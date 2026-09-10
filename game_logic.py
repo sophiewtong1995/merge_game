@@ -13,6 +13,37 @@ BASE_DRAGS = 24
 DRAGS_PER_STAGE = 6
 
 
+@dataclass(frozen=True)
+class WaveSpec:
+    kind: str
+    hp: int
+
+
+@dataclass(frozen=True)
+class LevelSpec:
+    moves: int
+    waves: tuple[WaveSpec, ...]
+
+
+LEVELS = (
+    LevelSpec(24, (WaveSpec("normal", 30),)),
+    LevelSpec(42, (WaveSpec("normal", 36), WaveSpec("boss", 150))),
+    LevelSpec(
+        60,
+        (WaveSpec("normal", 42), WaveSpec("normal", 48), WaveSpec("boss", 210)),
+    ),
+    LevelSpec(
+        82,
+        (
+            WaveSpec("normal", 52),
+            WaveSpec("boss", 200),
+            WaveSpec("normal", 58),
+            WaveSpec("boss", 270),
+        ),
+    ),
+)
+
+
 @dataclass
 class Piece:
     color: str
@@ -71,17 +102,66 @@ class GameState:
         self.board: list[list[Optional[Piece]]] = [
             [None for _ in range(self.cols)] for _ in range(self.rows)
         ]
-        self.monsters = {color: Monster(color) for color in COLORS}
+        self.level = 1
+        self.wave_index = 0
+        self.monsters: dict[str, Monster] = {}
+        self.boss: Optional[Monster] = None
         self.score = 0
         self.merges = 0
-        self.moves_remaining = self.moves_for_stage(1)
+        self.moves_remaining = self.level_spec.moves
         self.game_over = False
+        self.game_won = False
         self.wave_cleared = False
+        self._load_wave()
         self._fill_initial_board()
 
     @staticmethod
     def moves_for_stage(stage: int) -> int:
+        if 1 <= stage <= len(LEVELS):
+            return LEVELS[stage - 1].moves
         return BASE_DRAGS + (stage - 1) * DRAGS_PER_STAGE
+
+    @property
+    def level_spec(self) -> LevelSpec:
+        return LEVELS[self.level - 1]
+
+    @property
+    def wave_spec(self) -> WaveSpec:
+        return self.level_spec.waves[self.wave_index]
+
+    @property
+    def wave_number(self) -> int:
+        return self.wave_index + 1
+
+    @property
+    def total_waves(self) -> int:
+        return len(self.level_spec.waves)
+
+    @property
+    def is_boss_wave(self) -> bool:
+        return self.wave_spec.kind == "boss"
+
+    def _load_wave(self) -> None:
+        """载入当前波；棋盘与本关剩余拖拽次数都不会在这里重置。"""
+        spec = self.wave_spec
+        self.wave_cleared = False
+        if spec.kind == "boss":
+            boss_number = sum(
+                wave.kind == "boss"
+                for wave in self.level_spec.waves[: self.wave_index + 1]
+            )
+            self.boss = Monster(
+                "boss", stage=boss_number, hp=spec.hp, max_hp=spec.hp
+            )
+            self.monsters = {}
+        else:
+            self.boss = None
+            self.monsters = {
+                color: Monster(
+                    color, stage=self.level, hp=spec.hp, max_hp=spec.hp
+                )
+                for color in COLORS
+            }
 
     def _new_piece(self) -> Piece:
         return Piece(self.random.choice(COLORS), self.random.choice((1, 1, 1, 2)))
@@ -107,7 +187,7 @@ class GameState:
         return 0 <= row < self.rows and 0 <= col < self.cols
 
     def move(self, source: tuple[int, int], target: tuple[int, int]) -> MoveResult:
-        if self.game_over:
+        if self.game_over or self.game_won:
             return MoveResult("game_over")
         if not self.valid_cell(source) or not self.valid_cell(target) or source == target:
             return MoveResult("invalid")
@@ -138,7 +218,7 @@ class GameState:
 
     def activate(self, cell: tuple[int, int]) -> MoveResult:
         """单击最高级物品时将其消耗，并攻击对应颜色的怪物。"""
-        if self.game_over:
+        if self.game_over or self.game_won:
             return MoveResult("game_over")
         if not self.valid_cell(cell):
             return MoveResult("invalid")
@@ -146,8 +226,9 @@ class GameState:
         piece = self.board[row][col]
         if piece is None or piece.level != MAX_LEVEL:
             return MoveResult("inactive")
-        if self.monsters[piece.color].hp <= 0:
-            return MoveResult("waiting", color=piece.color, target=cell)
+        if not self.is_boss_wave and self.monsters[piece.color].hp <= 0:
+            self.board[row][col] = None
+            return MoveResult("clear", color=piece.color, target=cell)
 
         damage = MAX_LEVEL_ATTACK
         self.board[row][col] = None
@@ -176,32 +257,38 @@ class GameState:
     def _deal_damage(self, color: str, damage: int) -> tuple[bool, bool]:
         if self.wave_cleared:
             return False, False
-        defeated = self.monsters[color].take_damage(damage)
-        cleared = all(monster.hp <= 0 for monster in self.monsters.values())
+        if self.is_boss_wave:
+            assert self.boss is not None
+            defeated = self.boss.take_damage(damage)
+            cleared = self.boss.hp <= 0
+        else:
+            defeated = self.monsters[color].take_damage(damage)
+            cleared = all(monster.hp <= 0 for monster in self.monsters.values())
         if cleared:
             self.wave_cleared = True
         return defeated, cleared
 
-    def advance_wave(self) -> bool:
-        """连锁全部结算后再统一生成下一等级怪物。"""
+    def advance_wave(self) -> Optional[str]:
+        """结算完成后进入下一波或下一关，并描述发生的转场。"""
         if not self.wave_cleared:
-            return False
-        for monster in self.monsters.values():
-            monster.advance()
-        self.moves_remaining = self.moves_for_stage(
-            next(iter(self.monsters.values())).stage
-        )
-        self.wave_cleared = False
-        return True
+            return None
+        if self.wave_index + 1 < self.total_waves:
+            self.wave_index += 1
+            self._load_wave()
+            return "wave"
+        if self.level < len(LEVELS):
+            self.level += 1
+            self.wave_index = 0
+            self.moves_remaining = self.level_spec.moves
+            self._load_wave()
+            return "level"
+        self.game_won = True
+        return "won"
 
     def has_usable_max_piece(self) -> bool:
         for row in self.board:
             for piece in row:
-                if (
-                    piece
-                    and piece.level == MAX_LEVEL
-                    and self.monsters[piece.color].hp > 0
-                ):
+                if piece and piece.level == MAX_LEVEL:
                     return True
         return False
 

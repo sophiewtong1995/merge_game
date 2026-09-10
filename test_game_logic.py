@@ -1,6 +1,6 @@
 import unittest
 
-from game_logic import BASE_DRAGS, GameState, Piece
+from game_logic import BASE_DRAGS, LEVELS, GameState, Piece
 
 
 class GameLogicTests(unittest.TestCase):
@@ -156,7 +156,7 @@ class GameLogicTests(unittest.TestCase):
         self.game.resolve_attack(result.color, result.damage, result.target)
         self.assertEqual(self.game.monsters["blue"].hp, 20)
 
-    def test_monsters_advance_together_after_whole_wave_is_defeated(self):
+    def test_clearing_first_level_starts_level_two_and_refills_moves(self):
         self.clear_board()
         cells = {"red": (0, 0), "blue": (0, 1), "green": (0, 2)}
         for color, cell in cells.items():
@@ -180,10 +180,12 @@ class GameLogicTests(unittest.TestCase):
         self.assertTrue(all(monster.stage == 1 for monster in self.game.monsters.values()))
         self.assertTrue(all(monster.hp == 0 for monster in self.game.monsters.values()))
 
-        self.assertTrue(self.game.advance_wave())
+        self.assertEqual(self.game.advance_wave(), "level")
+        self.assertEqual(self.game.level, 2)
+        self.assertEqual(self.game.wave_number, 1)
         self.assertTrue(all(monster.stage == 2 for monster in self.game.monsters.values()))
-        self.assertTrue(all(monster.hp == 45 for monster in self.game.monsters.values()))
-        self.assertEqual(self.game.moves_remaining, 30)
+        self.assertTrue(all(monster.hp == 36 for monster in self.game.monsters.values()))
+        self.assertEqual(self.game.moves_remaining, 42)
 
     def test_remaining_chain_damage_does_not_reach_next_wave(self):
         self.clear_board()
@@ -206,16 +208,88 @@ class GameLogicTests(unittest.TestCase):
         self.game.resolve_attack("blue", remaining_merge.damage, remaining_merge.target)
         self.assertTrue(all(monster.stage == 1 for monster in self.game.monsters.values()))
 
-        self.game.advance_wave()
-        self.assertTrue(all(monster.hp == 45 for monster in self.game.monsters.values()))
+        self.assertEqual(self.game.advance_wave(), "level")
+        self.assertTrue(all(monster.hp == 36 for monster in self.game.monsters.values()))
 
-    def test_level_five_is_not_consumed_for_already_defeated_color(self):
+    def test_first_four_levels_have_expected_wave_layout(self):
+        self.assertEqual(
+            [[wave.kind for wave in level.waves] for level in LEVELS],
+            [
+                ["normal"],
+                ["normal", "boss"],
+                ["normal", "normal", "boss"],
+                ["normal", "boss", "normal", "boss"],
+            ],
+        )
+
+    def test_advancing_to_boss_keeps_moves_and_board(self):
+        self.game.level = 2
+        self.game.wave_index = 0
+        self.game.moves_remaining = 17
+        self.game._load_wave()
+        saved_piece = self.game.board[0][0]
+        self.game.wave_cleared = True
+
+        self.assertEqual(self.game.advance_wave(), "wave")
+        self.assertTrue(self.game.is_boss_wave)
+        self.assertEqual(self.game.moves_remaining, 17)
+        self.assertIs(self.game.board[0][0], saved_piece)
+        self.assertEqual(self.game.boss.hp, 150)
+
+    def test_every_color_can_damage_boss(self):
+        self.game.level = 2
+        self.game.wave_index = 1
+        self.game._load_wave()
+
+        for color in ("red", "blue", "green"):
+            before = self.game.boss.hp
+            result = self.game.resolve_attack(color, 7)
+            self.assertFalse(result.wave_cleared)
+            self.assertEqual(self.game.boss.hp, before - 7)
+
+    def test_any_color_level_five_is_usable_during_boss_wave(self):
+        self.clear_board()
+        self.game.level = 2
+        self.game.wave_index = 1
+        self.game._load_wave()
+        self.game.board[0][0] = Piece("red", 5)
+        self.game.board[0][1] = Piece("blue", 5)
+        self.game.board[0][2] = Piece("green", 5)
+
+        for cell in ((0, 0), (0, 1), (0, 2)):
+            attack = self.game.activate(cell)
+            self.assertEqual(attack.kind, "attack")
+
+    def test_clearing_final_boss_wins_the_game(self):
+        self.game.level = 4
+        self.game.wave_index = 3
+        self.game._load_wave()
+        self.game.boss.hp = 1
+        result = self.game.resolve_attack("green", 10)
+
+        self.assertTrue(result.wave_cleared)
+        self.assertEqual(self.game.advance_wave(), "won")
+        self.assertTrue(self.game.game_won)
+
+    def test_level_five_can_be_cleared_for_already_defeated_color(self):
         self.clear_board()
         self.game.monsters["red"].hp = 0
         self.game.board[2][2] = Piece("red", 5)
         result = self.game.activate((2, 2))
-        self.assertEqual(result.kind, "waiting")
-        self.assertEqual(self.game.board[2][2], Piece("red", 5))
+        self.assertEqual(result.kind, "clear")
+        self.assertEqual(result.damage, 0)
+        self.assertIsNone(self.game.board[2][2])
+        self.assertEqual(self.game.monsters["red"].hp, 0)
+
+    def test_defeated_color_level_five_prevents_failure_until_cleared(self):
+        self.clear_board()
+        self.game.moves_remaining = 0
+        self.game.monsters["red"].hp = 0
+        self.game.board[0][0] = Piece("red", 5)
+
+        self.assertFalse(self.game.check_failure())
+        self.game.activate((0, 0))
+        self.assertTrue(self.game.check_failure())
 
     def test_automatic_merge_does_not_consume_drag(self):
         self.clear_board()

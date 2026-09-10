@@ -40,6 +40,7 @@ PALETTE = {
     "pink_dark": (204, 83, 97),
     "aqua": (106, 198, 219),
     "gold": (250, 185, 55),
+    "boss": (151, 92, 190),
 }
 
 
@@ -177,7 +178,10 @@ class Game:
 
     def show_attack_resolution(self, result):
         if result.wave_cleared:
-            self.show_message("炮弹命中！本级怪物全部击败")
+            if self.state.is_boss_wave:
+                self.show_message("重击命中！Boss 已被击败")
+            else:
+                self.show_message("炮弹命中！本波怪物全部击败")
         elif result.monster_defeated:
             self.show_message("炮弹命中并击败怪物，等待其他颜色")
         else:
@@ -293,8 +297,9 @@ class Game:
                             + PROJECTILE_TRAVEL_DURATION
                             + 0.04
                         )
-                    elif result.kind == "waiting":
-                        self.show_message("这只怪物已击败，等待其他颜色", 1.5)
+                    elif result.kind == "clear":
+                        self.show_message("对应怪物已击败，五级物品已释放", 1.5)
+                        self.refill_at = time.monotonic() + 0.08
                 self.selected = None
                 self.drag_start = None
                 self.drag_pos = None
@@ -356,8 +361,18 @@ class Game:
             self.auto_merge_at = now + max_delay + FALL_ANIMATION_DURATION + 0.035
 
     def settle_board(self):
-        if self.state.advance_wave():
-            self.show_message("下一等级怪物一起出现！")
+        transition = self.state.advance_wave()
+        if transition == "wave":
+            if self.state.is_boss_wave:
+                self.show_message("Boss 登场！所有颜色都能造成伤害", 2.2)
+            else:
+                self.show_message(f"第 {self.state.wave_number} 波怪物出现！")
+        elif transition == "level":
+            self.show_message(
+                f"进入第 {self.state.level} 关，拖拽次数已补满！", 2.2
+            )
+        elif transition == "won":
+            self.show_message("前四关全部通关！", 3.0)
         else:
             self.state.check_failure()
 
@@ -584,6 +599,65 @@ class Game:
                 PALETTE["pink_dark"],
             )
             self.screen.blit(defeated, defeated_rect)
+
+    def draw_boss(self, center, boss):
+        """绘制不受颜色限制的糖果巨兽和加宽血条。"""
+        x, y = center
+        body = PALETTE["boss"]
+        dark = mix_color(body, PALETTE["ink"], 0.35)
+        light = mix_color(body, PALETTE["white"], 0.48)
+
+        pygame.draw.ellipse(self.screen, (207, 150, 139), (x - 82, y + 44, 164, 18))
+        for dx in (-58, 58):
+            pygame.draw.circle(self.screen, dark, (x + dx, y + 7), 30)
+            pygame.draw.circle(self.screen, body, (x + dx, y + 4), 24)
+        pygame.draw.polygon(
+            self.screen,
+            PALETTE["cream"],
+            [(x - 57, y - 35), (x - 40, y - 70), (x - 22, y - 39)],
+        )
+        pygame.draw.polygon(
+            self.screen,
+            PALETTE["cream"],
+            [(x + 57, y - 35), (x + 40, y - 70), (x + 22, y - 39)],
+        )
+        pygame.draw.ellipse(self.screen, dark, (x - 72, y - 52, 144, 118))
+        pygame.draw.ellipse(self.screen, body, (x - 66, y - 48, 132, 108))
+        pygame.draw.ellipse(self.screen, light, (x - 45, y - 36, 67, 28))
+
+        for dx in (-24, 24):
+            pygame.draw.ellipse(
+                self.screen, PALETTE["cream"], (x + dx - 13, y - 20, 26, 30)
+            )
+            pygame.draw.circle(self.screen, PALETTE["ink"], (x + dx, y - 4), 8)
+            pygame.draw.circle(self.screen, PALETTE["white"], (x + dx - 3, y - 8), 3)
+        pygame.draw.arc(
+            self.screen, PALETTE["ink"], (x - 25, y + 10, 50, 32), math.pi, math.tau, 5
+        )
+
+        crown = [
+            (x - 38, y - 52),
+            (x - 31, y - 82),
+            (x - 12, y - 66),
+            (x, y - 91),
+            (x + 13, y - 66),
+            (x + 33, y - 82),
+            (x + 39, y - 52),
+        ]
+        pygame.draw.polygon(self.screen, PALETTE["gold"], crown)
+        pygame.draw.polygon(self.screen, PALETTE["ink"], crown, 3)
+
+        label = font(18, True).render(f"BOSS {boss.stage}", True, PALETTE["ink"])
+        self.screen.blit(label, label.get_rect(center=(x, y + 74)))
+        bar = pygame.Rect(x - 155, y + 91, 310, 22)
+        rounded_rect(self.screen, PALETTE["ink"], bar, 10)
+        inner = bar.inflate(-6, -6)
+        rounded_rect(self.screen, PALETTE["cream"], inner, 7)
+        fill = inner.copy()
+        fill.width = max(0, int(inner.width * boss.hp / boss.max_hp))
+        rounded_rect(self.screen, body, fill, 7)
+        hp = font(14, True).render(f"{boss.hp}/{boss.max_hp}", True, PALETTE["ink"])
+        self.screen.blit(hp, hp.get_rect(center=bar.center))
 
     def _draw_piece_procedural(self, piece: Piece, rect, selected=False):
         if selected:
@@ -845,7 +919,10 @@ class Game:
             if elapsed < 0:
                 continue
             color = PALETTE[animation["color"]]
-            target_x, target_y = targets[animation["color"]]
+            if self.state.is_boss_wave:
+                target_x, target_y = (270, 270)
+            else:
+                target_x, target_y = targets[animation["color"]]
             if elapsed < PROJECTILE_TRAVEL_DURATION:
                 progress = elapsed / PROJECTILE_TRAVEL_DURATION
                 eased = 1.0 - (1.0 - progress) ** 3
@@ -913,10 +990,14 @@ class Game:
             self.draw_piece(piece, rect, True)
 
     def draw_hud(self):
-        positions = [(105, 280), (270, 280), (435, 280)]
-        for color, pos in zip(COLORS, positions):
-            self.draw_monster(color, pos, self.state.monsters[color])
-        score_panel = pygame.Rect(160, 104, 220, 38)
+        if self.state.is_boss_wave:
+            self.draw_boss((270, 260), self.state.boss)
+        else:
+            positions = [(105, 280), (270, 280), (435, 280)]
+            for color, pos in zip(COLORS, positions):
+                self.draw_monster(color, pos, self.state.monsters[color])
+
+        score_panel = pygame.Rect(80, 102, 380, 42)
         pygame.draw.rect(
             self.screen, PALETTE["pink_dark"], score_panel.move(0, 4), border_radius=18
         )
@@ -928,8 +1009,12 @@ class Game:
             PALETTE["pink_dark"]
         )
         moves_color = PALETTE["red"] if self.state.moves_remaining <= 5 else PALETTE["ink"]
-        moves = font(21, True).render(
-            f"剩余拖拽 {self.state.moves_remaining}", True, moves_color
+        wave_name = "Boss" if self.state.is_boss_wave else "普通"
+        moves = font(18, True).render(
+            f"第{self.state.level}关  {self.state.wave_number}/{self.state.total_waves}波·{wave_name}  "
+            f"本关剩余 {self.state.moves_remaining}",
+            True,
+            moves_color,
         )
         self.screen.blit(moves, moves.get_rect(center=score_panel.center))
 
@@ -947,7 +1032,7 @@ class Game:
         self.screen.blit(hint, hint.get_rect(center=(WIDTH // 2, 882)))
 
     def draw_game_over(self):
-        if not self.state.game_over:
+        if not (self.state.game_over or self.state.game_won):
             return
         shade = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         shade.fill((91, 58, 76, 165))
@@ -961,8 +1046,16 @@ class Game:
             self.screen, PALETTE["cream"], panel.inflate(-10, -10), 23,
             PALETTE["pink_dark"]
         )
-        title = font(38, True).render("挑战失败", True, PALETTE["red"])
-        detail = font(20).render("拖拽次数已用完", True, PALETTE["ink"])
+        if self.state.game_won:
+            title_text = "四关通关！"
+            detail_text = "所有糖果怪物与 Boss 已被击败"
+            title_color = PALETTE["green"]
+        else:
+            title_text = "挑战失败"
+            detail_text = "本关拖拽次数已用完"
+            title_color = PALETTE["red"]
+        title = font(38, True).render(title_text, True, title_color)
+        detail = font(20).render(detail_text, True, PALETTE["ink"])
         hint = font(18).render("按 R 重新开始", True, PALETTE["ink"])
         self.screen.blit(title, title.get_rect(center=(WIDTH // 2, 380)))
         self.screen.blit(detail, detail.get_rect(center=(WIDTH // 2, 445)))
