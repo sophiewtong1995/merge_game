@@ -22,6 +22,11 @@ BOARD_W, BOARD_H = CELL * 7, CELL * 6
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 PIECE_SPRITE_SIZE = (68, 68)
 MONSTER_SPRITE_SIZE = (126, 126)
+BOSS_SPRITE_SIZE = (180, 180)
+PROJECTILE_SPRITE_SIZE = (44, 44)
+PROJECTILE_TRAIL_SIZE = (122, 28)
+PROJECTILE_IMPACT_SIZE = (118, 118)
+PROJECTILE_CROWN_SIZE = (106, 88)
 
 PALETTE = {
     "sky": (104, 204, 235),
@@ -94,6 +99,37 @@ class Game:
         self.clock = pygame.time.Clock()
         self.piece_sprites = self.load_piece_sprites()
         self.monster_sprites = self.load_monster_sprites()
+        self.boss_sprite = self.load_sprite(
+            ASSET_DIR / "monsters" / "boss.png",
+            BOSS_SPRITE_SIZE,
+        )
+        self.projectile_sprites = {
+            color: self.load_sprite(
+                ASSET_DIR / "effects" / "royal_star_comet" / f"projectile_{color}.png",
+                PROJECTILE_SPRITE_SIZE,
+            )
+            for color in COLORS
+        }
+        self.projectile_trails = {
+            color: self.load_sprite(
+                ASSET_DIR / "effects" / "royal_star_comet" / f"trail_{color}.png",
+                PROJECTILE_TRAIL_SIZE,
+            )
+            for color in COLORS
+        }
+        self.projectile_impact = self.load_sprite(
+            ASSET_DIR / "effects" / "royal_star_comet" / "impact_starburst.png",
+            PROJECTILE_IMPACT_SIZE,
+        )
+        self.projectile_impacts = {
+            color: self.colorize_effect(self.projectile_impact, PALETTE[color])
+            for color in COLORS
+        }
+        self.projectile_crown = self.load_sprite(
+            ASSET_DIR / "effects" / "royal_star_comet" / "crown_flash.png",
+            PROJECTILE_CROWN_SIZE,
+        )
+        self.projectile_particles = self.load_projectile_particles()
         self.state = GameState()
         self.selected = None
         self.drag_start = None
@@ -139,6 +175,40 @@ class Game:
             for color in COLORS
         }
 
+    def load_projectile_particles(self):
+        path = ASSET_DIR / "effects" / "royal_star_comet" / "particles_atlas.png"
+        try:
+            atlas = pygame.image.load(path).convert_alpha()
+        except (FileNotFoundError, pygame.error):
+            return []
+
+        particles = []
+        width, height = atlas.get_size()
+        target_sizes = (14, 10, 11)
+        for row in range(3):
+            row_particles = []
+            for col in range(4):
+                left = round(col * width / 4)
+                right = round((col + 1) * width / 4)
+                top = round(row * height / 3)
+                bottom = round((row + 1) * height / 3)
+                tile = atlas.subsurface((left, top, right - left, bottom - top)).copy()
+                bounds = tile.get_bounding_rect(min_alpha=8)
+                if bounds.width and bounds.height:
+                    tile = tile.subsurface(bounds).copy()
+                    size = target_sizes[row]
+                    scale = min(size / tile.get_width(), size / tile.get_height())
+                    tile = pygame.transform.smoothscale(
+                        tile,
+                        (
+                            max(1, round(tile.get_width() * scale)),
+                            max(1, round(tile.get_height() * scale)),
+                        ),
+                    )
+                row_particles.append(tile)
+            particles.append(row_particles)
+        return particles
+
     def cell_at(self, pos):
         x, y = pos
         if not (BOARD_X <= x < BOARD_X + BOARD_W and BOARD_Y <= y < BOARD_Y + BOARD_H):
@@ -173,8 +243,10 @@ class Game:
             if animate:
                 self.start_merge_animation(result)
         elif result.kind == "attack":
-            self.show_message(f"五级物品准备发射：{result.damage} 点攻击")
-            self.start_projectile(result.target, result.color, result.damage)
+            self.show_message(f"六级物品准备发射：{result.damage} 点攻击")
+            self.start_projectile(
+                result.target, result.color, result.damage, royal=True
+            )
 
     def show_attack_resolution(self, result):
         if result.wave_cleared:
@@ -202,7 +274,7 @@ class Game:
         self.active_chain_attack["damage"] += result.damage
         self.active_chain_attack["source"] = result.target
 
-    def start_projectile(self, source, color, damage, delay=0.0):
+    def start_projectile(self, source, color, damage, delay=0.0, royal=False):
         if source is None:
             return
         self.projectile_animations.append(
@@ -213,6 +285,7 @@ class Game:
                 "born": time.monotonic(),
                 "delay": delay,
                 "applied": False,
+                "royal": royal,
             }
         )
 
@@ -298,7 +371,7 @@ class Game:
                             + 0.04
                         )
                     elif result.kind == "clear":
-                        self.show_message("对应怪物已击败，五级物品已释放", 1.5)
+                        self.show_message("对应怪物已击败，六级物品已释放", 1.5)
                         self.refill_at = time.monotonic() + 0.08
                 self.selected = None
                 self.drag_start = None
@@ -316,7 +389,8 @@ class Game:
             if now - item["born"] < item["delay"] + FALL_ANIMATION_DURATION
         ]
         for item in self.projectile_animations:
-            if not item["applied"] and now - item["born"] >= item["delay"]:
+            hit_at = item["delay"] + PROJECTILE_TRAVEL_DURATION
+            if not item["applied"] and now - item["born"] >= hit_at:
                 item["applied"] = True
                 resolution = self.state.resolve_attack(
                     item["color"], item["damage"], item["source"]
@@ -514,9 +588,6 @@ class Game:
             [(x + 7, y + 9), (x + 2, y + 9), (x + 4, y + 15)],
         )
 
-        if monster.stage > 1:
-            pygame.draw.polygon(self.screen, PALETTE["gold"], star_points((x, y - 45), 11, 5))
-
         badge_rect = pygame.Rect(x - 27, y + 47, 54, 20)
         glossy_rect(self.screen, PALETTE["cream"], badge_rect, 9, PALETTE["pink_dark"])
         badge = font(14, True).render(f"Lv.{monster.stage}", True, PALETTE["ink"])
@@ -555,11 +626,6 @@ class Game:
         light = mix_color(body, PALETTE["white"], 0.45)
         sprite_rect = sprite.get_rect(center=(x, y - 8))
         self.screen.blit(sprite, sprite_rect)
-
-        if monster.stage > 1:
-            crown = star_points((x, sprite_rect.top + 8), 11, 5)
-            pygame.draw.polygon(self.screen, PALETTE["gold"], crown)
-            pygame.draw.polygon(self.screen, PALETTE["ink"], crown, 2)
 
         badge_rect = pygame.Rect(x - 27, y + 49, 54, 20)
         glossy_rect(
@@ -607,45 +673,58 @@ class Game:
         dark = mix_color(body, PALETTE["ink"], 0.35)
         light = mix_color(body, PALETTE["white"], 0.48)
 
-        pygame.draw.ellipse(self.screen, (207, 150, 139), (x - 82, y + 44, 164, 18))
-        for dx in (-58, 58):
-            pygame.draw.circle(self.screen, dark, (x + dx, y + 7), 30)
-            pygame.draw.circle(self.screen, body, (x + dx, y + 4), 24)
-        pygame.draw.polygon(
-            self.screen,
-            PALETTE["cream"],
-            [(x - 57, y - 35), (x - 40, y - 70), (x - 22, y - 39)],
-        )
-        pygame.draw.polygon(
-            self.screen,
-            PALETTE["cream"],
-            [(x + 57, y - 35), (x + 40, y - 70), (x + 22, y - 39)],
-        )
-        pygame.draw.ellipse(self.screen, dark, (x - 72, y - 52, 144, 118))
-        pygame.draw.ellipse(self.screen, body, (x - 66, y - 48, 132, 108))
-        pygame.draw.ellipse(self.screen, light, (x - 45, y - 36, 67, 28))
-
-        for dx in (-24, 24):
+        if self.boss_sprite is not None:
+            sprite_rect = self.boss_sprite.get_rect(center=(x, y - 16))
+            self.screen.blit(self.boss_sprite, sprite_rect)
+        else:
             pygame.draw.ellipse(
-                self.screen, PALETTE["cream"], (x + dx - 13, y - 20, 26, 30)
+                self.screen, (207, 150, 139), (x - 82, y + 44, 164, 18)
             )
-            pygame.draw.circle(self.screen, PALETTE["ink"], (x + dx, y - 4), 8)
-            pygame.draw.circle(self.screen, PALETTE["white"], (x + dx - 3, y - 8), 3)
-        pygame.draw.arc(
-            self.screen, PALETTE["ink"], (x - 25, y + 10, 50, 32), math.pi, math.tau, 5
-        )
+            for dx in (-58, 58):
+                pygame.draw.circle(self.screen, dark, (x + dx, y + 7), 30)
+                pygame.draw.circle(self.screen, body, (x + dx, y + 4), 24)
+            pygame.draw.polygon(
+                self.screen,
+                PALETTE["cream"],
+                [(x - 57, y - 35), (x - 40, y - 70), (x - 22, y - 39)],
+            )
+            pygame.draw.polygon(
+                self.screen,
+                PALETTE["cream"],
+                [(x + 57, y - 35), (x + 40, y - 70), (x + 22, y - 39)],
+            )
+            pygame.draw.ellipse(self.screen, dark, (x - 72, y - 52, 144, 118))
+            pygame.draw.ellipse(self.screen, body, (x - 66, y - 48, 132, 108))
+            pygame.draw.ellipse(self.screen, light, (x - 45, y - 36, 67, 28))
 
-        crown = [
-            (x - 38, y - 52),
-            (x - 31, y - 82),
-            (x - 12, y - 66),
-            (x, y - 91),
-            (x + 13, y - 66),
-            (x + 33, y - 82),
-            (x + 39, y - 52),
-        ]
-        pygame.draw.polygon(self.screen, PALETTE["gold"], crown)
-        pygame.draw.polygon(self.screen, PALETTE["ink"], crown, 3)
+            for dx in (-24, 24):
+                pygame.draw.ellipse(
+                    self.screen, PALETTE["cream"], (x + dx - 13, y - 20, 26, 30)
+                )
+                pygame.draw.circle(self.screen, PALETTE["ink"], (x + dx, y - 4), 8)
+                pygame.draw.circle(
+                    self.screen, PALETTE["white"], (x + dx - 3, y - 8), 3
+                )
+            pygame.draw.arc(
+                self.screen,
+                PALETTE["ink"],
+                (x - 25, y + 10, 50, 32),
+                math.pi,
+                math.tau,
+                5,
+            )
+
+            crown = [
+                (x - 38, y - 52),
+                (x - 31, y - 82),
+                (x - 12, y - 66),
+                (x, y - 91),
+                (x + 13, y - 66),
+                (x + 33, y - 82),
+                (x + 39, y - 52),
+            ]
+            pygame.draw.polygon(self.screen, PALETTE["gold"], crown)
+            pygame.draw.polygon(self.screen, PALETTE["ink"], crown, 3)
 
         label = font(18, True).render(f"BOSS {boss.stage}", True, PALETTE["ink"])
         self.screen.blit(label, label.get_rect(center=(x, y + 74)))
@@ -911,6 +990,88 @@ class Game:
             self.draw_piece(animation["piece"], rect)
         self.screen.set_clip(previous_clip)
 
+    @staticmethod
+    def projectile_point(source, target, progress):
+        eased = 1.0 - (1.0 - progress) ** 3
+        x = source[0] + (target[0] - source[0]) * eased
+        y = (
+            source[1]
+            + (target[1] - source[1]) * eased
+            - math.sin(math.pi * eased) * 42
+        )
+        return x, y
+
+    def draw_effect_sprite(self, sprite, center, scale=1.0, angle=0.0, alpha=255):
+        if sprite is None:
+            return
+        transformed = pygame.transform.rotozoom(sprite, angle, scale)
+        if alpha < 255:
+            transformed.set_alpha(max(0, min(255, round(alpha))))
+        self.screen.blit(transformed, transformed.get_rect(center=center))
+
+    def draw_colored_glow(self, center, color, radius, alpha):
+        glow = pygame.Surface((radius * 2 + 8, radius * 2 + 8), pygame.SRCALPHA)
+        glow_center = (radius + 4, radius + 4)
+        for scale, opacity in ((1.0, 0.12), (0.72, 0.18), (0.45, 0.26)):
+            pygame.draw.circle(
+                glow,
+                (*color, round(alpha * opacity)),
+                glow_center,
+                max(1, round(radius * scale)),
+            )
+        self.screen.blit(glow, glow.get_rect(center=center))
+
+    @staticmethod
+    def colorize_effect(sprite, color):
+        if sprite is None:
+            return None
+        colored = pygame.Surface(sprite.get_size(), pygame.SRCALPHA)
+        width, height = sprite.get_size()
+        for y in range(height):
+            for x in range(width):
+                source = sprite.get_at((x, y))
+                if not source.a:
+                    continue
+                brightness = max(source.r, source.g, source.b) / 255
+                highlight = 0.04 + brightness * 0.24
+                tinted = mix_color(color, PALETTE["white"], highlight)
+                shade = 0.72 + brightness * 0.28
+                colored.set_at(
+                    (x, y),
+                    (
+                        round(tinted[0] * shade),
+                        round(tinted[1] * shade),
+                        round(tinted[2] * shade),
+                        source.a,
+                    ),
+                )
+        return colored
+
+    def draw_projectile_particles(self, animation, source, target, progress):
+        if len(self.projectile_particles) != 3:
+            return
+        color_index = COLORS.index(animation["color"])
+        particle_choices = (
+            self.projectile_particles[0][color_index],
+            self.projectile_particles[1][color_index],
+            self.projectile_particles[2][color_index],
+        )
+        for index, particle in enumerate(particle_choices):
+            lag = 0.055 + index * 0.045
+            sample_progress = max(0.0, progress - lag)
+            px, py = self.projectile_point(source, target, sample_progress)
+            wobble = math.sin(progress * 24 + index * 2.3) * (4 + index * 2)
+            px += wobble
+            py += math.cos(progress * 21 + index) * 3
+            alpha = min(220, progress * 700) * (1.0 - index * 0.13)
+            self.draw_effect_sprite(
+                particle,
+                (round(px), round(py)),
+                scale=0.78 + index * 0.08,
+                angle=progress * 260 + index * 37,
+                alpha=alpha,
+            )
+
     def draw_projectiles(self):
         now = time.monotonic()
         targets = {"red": (105, 280), "blue": (270, 280), "green": (435, 280)}
@@ -918,54 +1079,126 @@ class Game:
             elapsed = now - animation["born"] - animation["delay"]
             if elapsed < 0:
                 continue
-            color = PALETTE[animation["color"]]
-            if self.state.is_boss_wave:
-                target_x, target_y = (270, 270)
-            else:
-                target_x, target_y = targets[animation["color"]]
+            color_name = animation["color"]
+            color = PALETTE[color_name]
+            target = (270, 270) if self.state.is_boss_wave else targets[color_name]
+            source = self.cell_center(animation["source"])
             if elapsed < PROJECTILE_TRAVEL_DURATION:
                 progress = elapsed / PROJECTILE_TRAVEL_DURATION
-                eased = 1.0 - (1.0 - progress) ** 3
-                source_x, source_y = self.cell_center(animation["source"])
-                x = source_x + (target_x - source_x) * eased
-                y = source_y + (target_y - source_y) * eased - math.sin(math.pi * eased) * 42
-                previous = max(0.0, eased - 0.08)
-                trail_x = source_x + (target_x - source_x) * previous
-                trail_y = source_y + (target_y - source_y) * previous - math.sin(math.pi * previous) * 42
-                pygame.draw.line(
-                    self.screen, PALETTE["gold"], (trail_x, trail_y), (x, y), 7
+                x, y = self.projectile_point(source, target, progress)
+                previous_progress = max(0.0, progress - 0.025)
+                previous_x, previous_y = self.projectile_point(
+                    source, target, previous_progress
                 )
+                direction_x = x - previous_x
+                direction_y = y - previous_y
+                direction_length = max(0.001, math.hypot(direction_x, direction_y))
+                unit_x = direction_x / direction_length
+                unit_y = direction_y / direction_length
+                angle = math.degrees(math.atan2(-direction_y, direction_x))
+
+                trail = self.projectile_trails.get(color_name)
+                if trail is not None and progress > 0.025:
+                    trail = pygame.transform.flip(trail, True, False)
+                    trail_center = (
+                        round(x - unit_x * PROJECTILE_TRAIL_SIZE[0] * 0.42),
+                        round(y - unit_y * PROJECTILE_TRAIL_SIZE[0] * 0.42),
+                    )
+                    self.draw_effect_sprite(
+                        trail,
+                        trail_center,
+                        scale=0.72 + min(0.28, progress),
+                        angle=angle,
+                        alpha=min(255, progress * 720),
+                    )
+                else:
+                    trail_x = x - unit_x * 36
+                    trail_y = y - unit_y * 36
+                    pygame.draw.line(
+                        self.screen, PALETTE["cream"], (trail_x, trail_y), (x, y), 8
+                    )
+                    pygame.draw.line(
+                        self.screen, color, (trail_x, trail_y), (x, y), 4
+                    )
+
+                self.draw_projectile_particles(animation, source, target, progress)
                 candy_center = (round(x), round(y))
-                pygame.draw.polygon(
-                    self.screen,
-                    color,
-                    [
-                        (candy_center[0] - 15, candy_center[1]),
-                        (candy_center[0] - 9, candy_center[1] - 7),
-                        (candy_center[0] - 9, candy_center[1] + 7),
-                    ],
-                )
-                pygame.draw.polygon(
-                    self.screen,
-                    color,
-                    [
-                        (candy_center[0] + 15, candy_center[1]),
-                        (candy_center[0] + 9, candy_center[1] - 7),
-                        (candy_center[0] + 9, candy_center[1] + 7),
-                    ],
-                )
-                pygame.draw.circle(self.screen, PALETTE["white"], candy_center, 10)
-                pygame.draw.circle(self.screen, color, candy_center, 7)
+                self.draw_colored_glow(candy_center, color, 28, 155)
+                projectile = self.projectile_sprites.get(color_name)
+                if projectile is not None:
+                    launch_scale = 0.62 + min(0.38, progress * 2.4)
+                    self.draw_effect_sprite(
+                        projectile,
+                        candy_center,
+                        scale=launch_scale,
+                        angle=-progress * 690,
+                    )
+                else:
+                    pygame.draw.polygon(
+                        self.screen,
+                        color,
+                        star_points(candy_center, 16, 8, rotation=-math.pi / 2 + progress * 8),
+                    )
+                    pygame.draw.polygon(
+                        self.screen, PALETTE["cream"], star_points(candy_center, 9, 4)
+                    )
+
+                if animation.get("royal") and progress < 0.86:
+                    crown_progress = progress / 0.86
+                    fade_in = min(1.0, crown_progress / 0.16)
+                    fade_out = min(1.0, (1.0 - crown_progress) / 0.30)
+                    crown_alpha = 255 * min(fade_in, fade_out)
+                    crown_scale = 0.72 + min(0.24, crown_progress * 1.4)
+                    crown_center = (source[0], source[1] - 24)
+                    self.draw_colored_glow(
+                        crown_center,
+                        color,
+                        48,
+                        crown_alpha * 0.9,
+                    )
+                    self.draw_effect_sprite(
+                        self.projectile_crown,
+                        crown_center,
+                        scale=crown_scale,
+                        alpha=crown_alpha,
+                    )
             else:
-                impact = min(1.0, (elapsed - PROJECTILE_TRAVEL_DURATION) / PROJECTILE_IMPACT_DURATION)
-                radius = int(18 + impact * 34)
-                ring_color = tuple(min(255, channel + 70) for channel in color)
-                pygame.draw.circle(self.screen, ring_color, (target_x, target_y), radius, 5)
+                impact = min(
+                    1.0,
+                    (elapsed - PROJECTILE_TRAVEL_DURATION)
+                    / PROJECTILE_IMPACT_DURATION,
+                )
+                impact_scale = 0.46 + 0.78 * (1.0 - (1.0 - impact) ** 3)
+                impact_alpha = 255 * (1.0 - impact) ** 0.62
+                self.draw_colored_glow(
+                    target,
+                    color,
+                    round(64 + impact * 28),
+                    impact_alpha,
+                )
+                colored_impact = self.projectile_impacts.get(color_name)
+                if colored_impact is not None:
+                    self.draw_effect_sprite(
+                        colored_impact,
+                        target,
+                        scale=impact_scale,
+                        angle=impact * 42,
+                        alpha=impact_alpha,
+                    )
+                else:
+                    radius = int(18 + impact * 34)
+                    ring_color = tuple(min(255, channel + 70) for channel in color)
+                    pygame.draw.polygon(
+                        self.screen,
+                        ring_color,
+                        star_points(target, radius, radius * 0.48),
+                        5,
+                    )
                 damage = font(22, True).render(
                     f"攻击 +{animation['damage']}", True, color
                 )
                 damage_rect = damage.get_rect(
-                    center=(target_x, target_y - 68 - impact * 7)
+                    center=(target[0], target[1] - 68 - impact * 7)
                 )
                 glossy_rect(
                     self.screen,
@@ -974,10 +1207,7 @@ class Game:
                     10,
                     PALETTE["pink_dark"],
                 )
-                self.screen.blit(
-                    damage,
-                    damage_rect,
-                )
+                self.screen.blit(damage, damage_rect)
 
     def draw_dragged_piece(self):
         if not self.is_dragging or self.drag_start is None or self.drag_pos is None:

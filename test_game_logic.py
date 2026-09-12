@@ -115,7 +115,7 @@ class GameLogicTests(unittest.TestCase):
         self.assertEqual(self.game.board[0][2], Piece("blue", 3))
         self.assertIsNone(self.game.board[0][1])
 
-    def test_optimal_path_can_build_level_five_without_removing_it(self):
+    def test_optimal_path_can_build_level_five_as_an_intermediate_piece(self):
         self.clear_board()
         self.game.board[0][0] = Piece("green", 3)
         self.game.board[0][1] = Piece("green", 2)
@@ -129,32 +129,48 @@ class GameLogicTests(unittest.TestCase):
             results.append(result.kind)
             focus = result.target
 
-        self.assertEqual(results, ["merge", "merge", "max_merge"])
+        self.assertEqual(results, ["merge", "merge", "merge"])
         self.assertEqual(self.game.board[1][0], Piece("green", 5))
         self.assertEqual(self.game.monsters["green"].hp, 30)
 
-    def test_level_four_merge_creates_persistent_level_five(self):
+    def test_level_four_merge_creates_intermediate_level_five(self):
         self.clear_board()
         self.game.board[0][0] = Piece("blue", 4)
         self.game.board[0][1] = Piece("blue", 4)
         result = self.game.auto_merge_once()
-        self.assertEqual(result.kind, "max_merge")
+        self.assertEqual(result.kind, "merge")
         self.assertEqual(result.target, (0, 0))
         self.assertEqual(self.game.board[0][0], Piece("blue", 5))
         self.assertIsNone(self.game.board[0][1])
         self.assertEqual(result.damage, 8)
         self.assertEqual(self.game.monsters["blue"].hp, 30)
 
-    def test_clicking_level_five_attacks_and_removes_it(self):
+    def test_level_five_merge_creates_persistent_level_six(self):
+        self.clear_board()
+        self.game.board[0][0] = Piece("red", 5)
+        self.game.board[0][1] = Piece("red", 5)
+        result = self.game.auto_merge_once()
+        self.assertEqual(result.kind, "max_merge")
+        self.assertEqual(result.damage, 16)
+        self.assertEqual(self.game.board[result.target[0]][result.target[1]], Piece("red", 6))
+
+    def test_level_five_cannot_be_activated(self):
         self.clear_board()
         self.game.board[2][2] = Piece("blue", 5)
         result = self.game.activate((2, 2))
+        self.assertEqual(result.kind, "inactive")
+        self.assertEqual(self.game.board[2][2], Piece("blue", 5))
+
+    def test_clicking_level_six_attacks_and_removes_it(self):
+        self.clear_board()
+        self.game.board[2][2] = Piece("blue", 6)
+        result = self.game.activate((2, 2))
         self.assertEqual(result.kind, "attack")
-        self.assertEqual(result.damage, 10)
+        self.assertEqual(result.damage, 20)
         self.assertEqual(self.game.monsters["blue"].hp, 30)
         self.assertIsNone(self.game.board[2][2])
         self.game.resolve_attack(result.color, result.damage, result.target)
-        self.assertEqual(self.game.monsters["blue"].hp, 20)
+        self.assertEqual(self.game.monsters["blue"].hp, 10)
 
     def test_clearing_first_level_starts_level_two_and_refills_moves(self):
         self.clear_board()
@@ -162,7 +178,7 @@ class GameLogicTests(unittest.TestCase):
         for color, cell in cells.items():
             self.game.monsters[color].hp = 1
             row, col = cell
-            self.game.board[row][col] = Piece(color, 5)
+            self.game.board[row][col] = Piece(color, 6)
 
         red_attack = self.game.activate(cells["red"])
         blue_attack = self.game.activate(cells["blue"])
@@ -234,7 +250,7 @@ class GameLogicTests(unittest.TestCase):
         self.assertTrue(self.game.is_boss_wave)
         self.assertEqual(self.game.moves_remaining, 17)
         self.assertIs(self.game.board[0][0], saved_piece)
-        self.assertEqual(self.game.boss.hp, 150)
+        self.assertEqual(self.game.boss.hp, 140)
 
     def test_every_color_can_damage_boss(self):
         self.game.level = 2
@@ -247,14 +263,14 @@ class GameLogicTests(unittest.TestCase):
             self.assertFalse(result.wave_cleared)
             self.assertEqual(self.game.boss.hp, before - 7)
 
-    def test_any_color_level_five_is_usable_during_boss_wave(self):
+    def test_any_color_level_six_is_usable_during_boss_wave(self):
         self.clear_board()
         self.game.level = 2
         self.game.wave_index = 1
         self.game._load_wave()
-        self.game.board[0][0] = Piece("red", 5)
-        self.game.board[0][1] = Piece("blue", 5)
-        self.game.board[0][2] = Piece("green", 5)
+        self.game.board[0][0] = Piece("red", 6)
+        self.game.board[0][1] = Piece("blue", 6)
+        self.game.board[0][2] = Piece("green", 6)
 
         for cell in ((0, 0), (0, 1), (0, 2)):
             attack = self.game.activate(cell)
@@ -271,21 +287,21 @@ class GameLogicTests(unittest.TestCase):
         self.assertEqual(self.game.advance_wave(), "won")
         self.assertTrue(self.game.game_won)
 
-    def test_level_five_can_be_cleared_for_already_defeated_color(self):
+    def test_level_six_can_be_cleared_for_already_defeated_color(self):
         self.clear_board()
         self.game.monsters["red"].hp = 0
-        self.game.board[2][2] = Piece("red", 5)
+        self.game.board[2][2] = Piece("red", 6)
         result = self.game.activate((2, 2))
         self.assertEqual(result.kind, "clear")
         self.assertEqual(result.damage, 0)
         self.assertIsNone(self.game.board[2][2])
         self.assertEqual(self.game.monsters["red"].hp, 0)
 
-    def test_defeated_color_level_five_prevents_failure_until_cleared(self):
+    def test_defeated_color_level_six_prevents_failure_until_cleared(self):
         self.clear_board()
         self.game.moves_remaining = 0
         self.game.monsters["red"].hp = 0
-        self.game.board[0][0] = Piece("red", 5)
+        self.game.board[0][0] = Piece("red", 6)
 
         self.assertFalse(self.game.check_failure())
         self.game.activate((0, 0))
@@ -298,10 +314,10 @@ class GameLogicTests(unittest.TestCase):
         self.game.auto_merge_once()
         self.assertEqual(self.game.moves_remaining, BASE_DRAGS)
 
-    def test_zero_drags_fails_only_after_usable_level_five_is_gone(self):
+    def test_zero_drags_fails_only_after_usable_level_six_is_gone(self):
         self.clear_board()
         self.game.moves_remaining = 0
-        self.game.board[0][0] = Piece("blue", 5)
+        self.game.board[0][0] = Piece("blue", 6)
         self.assertFalse(self.game.check_failure())
         self.assertFalse(self.game.game_over)
 
@@ -321,7 +337,13 @@ class GameLogicTests(unittest.TestCase):
         self.assertEqual(self.game.board[5][6], Piece("green", 1))
 
     def test_every_merge_level_has_expected_damage(self):
-        for level, expected_damage in ((1, 1), (2, 2), (3, 4), (4, 8)):
+        for level, expected_damage in (
+            (1, 1),
+            (2, 2),
+            (3, 4),
+            (4, 8),
+            (5, 16),
+        ):
             with self.subTest(level=level):
                 game = GameState(seed=level)
                 game.board = [[None for _ in range(game.cols)] for _ in range(game.rows)]

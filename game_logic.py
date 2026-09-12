@@ -6,9 +6,9 @@ from typing import Optional
 
 
 COLORS = ("red", "blue", "green")
-MAX_LEVEL = 5
-MERGE_DAMAGE = {1: 1, 2: 2, 3: 4, 4: 8}
-MAX_LEVEL_ATTACK = 10
+MAX_LEVEL = 6
+MERGE_DAMAGE = {1: 1, 2: 2, 3: 4, 4: 8, 5: 16}
+MAX_LEVEL_ATTACK = 20
 BASE_DRAGS = 24
 DRAGS_PER_STAGE = 6
 
@@ -27,7 +27,7 @@ class LevelSpec:
 
 LEVELS = (
     LevelSpec(24, (WaveSpec("normal", 30),)),
-    LevelSpec(42, (WaveSpec("normal", 36), WaveSpec("boss", 150))),
+    LevelSpec(42, (WaveSpec("normal", 36), WaveSpec("boss", 140))),
     LevelSpec(
         60,
         (WaveSpec("normal", 42), WaveSpec("normal", 48), WaveSpec("boss", 210)),
