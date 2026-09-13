@@ -1,0 +1,103 @@
+"""User-facing copy for every supported language.
+
+English is the release default. Chinese is kept here so a language selector can
+be added later without duplicating the game or its rules.
+"""
+
+DEFAULT_LANGUAGE = "en"
+
+
+TEXT = {
+    "en": {
+        "game_title": "CANDY MONSTER MERGE",
+        "intro": "Drag matching candies together to merge!",
+        "no_moves": "No moves left!",
+        "different_piece": "Those candies don't match",
+        "merge_success": "Attack power +{damage}",
+        "max_merge": "Level 6 candy created! Attack power +{damage}",
+        "level_six_ready": "Royal attack! {damage} damage",
+        "boss_defeated": "Boss defeated!",
+        "wave_defeated": "Wave cleared!",
+        "monster_defeated": "Monster defeated! Target the other colors!",
+        "damage_dealt": "Hit! {damage} damage",
+        "new_game": "New game!",
+        "level_restarted": "Level {level} restarted!",
+        "confirm_retry_level": "Press R again to restart this level",
+        "confirm_new_game": "Press Shift+R again to start a new game",
+        "settling": "Finishing the current chain...",
+        "returned": "Invalid move — candy returned",
+        "monster_already_defeated": "Target already defeated. Candy removed",
+        "boss_incoming": "Boss incoming! All colors deal damage",
+        "wave_incoming": "Wave {wave} incoming!",
+        "level_incoming": "Level {level}! Moves restored",
+        "all_levels_cleared": "All eight levels cleared!",
+        "level_clear_title": "LEVEL {level}",
+        "level_clear_status": "CLEARED!",
+        "continue_button": "CONTINUE",
+        "default_hint": "Drag matching candies together · Click Level 6 to attack",
+        "restart_short": "Restart",
+        "new_game_short": "New Game",
+        "quit_short": "Quit",
+        "level_wave": "LEVEL {level} · WAVE {wave}/{total}",
+        "moves": "{count} MOVES",
+        "damage_popup": "{damage} DAMAGE",
+        "victory_title": "ALL LEVELS CLEARED!",
+        "victory_detail": "All candy monsters and bosses defeated!",
+        "defeat_title": "OUT OF MOVES",
+        "defeat_detail": "No moves or Level 6 candies left",
+        "failure_progress": "LEVEL {level} · WAVE {wave}/{total}",
+        "retry_level_button": "RETRY LEVEL",
+        "new_game_button": "NEW GAME",
+        "restart": "Press R to restart",
+        "pygame_error": "Pygame could not start: {error}",
+    },
+    "zh_cn": {
+        "game_title": "糖果玩具大作战",
+        "intro": "把相同物品摆到相邻位置",
+        "no_moves": "拖拽次数已用完",
+        "different_piece": "物品不同，返回原位",
+        "merge_success": "合成成功！累计 {damage} 点攻击",
+        "max_merge": "达到最高等级！累计 {damage} 点攻击",
+        "level_six_ready": "六级物品准备发射：{damage} 点攻击",
+        "boss_defeated": "重击命中！Boss 倒下了",
+        "wave_defeated": "炮弹命中！本波怪物全部倒下",
+        "monster_defeated": "炮弹命中！怪物倒下，等待其他颜色",
+        "damage_dealt": "炮弹发射！怪物生命减少 {damage}",
+        "new_game": "新游戏开始！",
+        "level_restarted": "第 {level} 关重新开始！",
+        "confirm_retry_level": "再按一次 R 重新挑战本关",
+        "confirm_new_game": "再按一次 Shift+R 从第一关开始",
+        "settling": "正在结算，请稍候",
+        "returned": "已返回原位",
+        "monster_already_defeated": "对应怪物已经倒下，六级物品已释放",
+        "boss_incoming": "Boss 登场！所有颜色都能造成伤害",
+        "wave_incoming": "第 {wave} 波怪物出现！",
+        "level_incoming": "进入第 {level} 关，拖拽次数已补满！",
+        "all_levels_cleared": "八关全部通关！",
+        "level_clear_title": "第 {level} 关",
+        "level_clear_status": "通关！",
+        "continue_button": "继续",
+        "default_hint": "拖拽合成；单击最高级物品发动攻击",
+        "restart_short": "重试本关",
+        "new_game_short": "新游戏",
+        "quit_short": "退出",
+        "level_wave": "第{level}关 · 第{wave}/{total}波",
+        "moves": "剩余 {count} 步",
+        "damage_popup": "攻击 +{damage}",
+        "victory_title": "八关通关！",
+        "victory_detail": "所有糖果怪物与 Boss 已被击败",
+        "defeat_title": "挑战失败",
+        "defeat_detail": "本关拖拽次数已用完",
+        "failure_progress": "第{level}关 · 第{wave}/{total}波",
+        "retry_level_button": "重新挑战本关",
+        "new_game_button": "从第一关开始",
+        "restart": "按 R 重新开始",
+        "pygame_error": "Pygame 无法启动：{error}",
+    },
+}
+
+
+def translate(language: str, key: str, **values) -> str:
+    language_text = TEXT.get(language, TEXT[DEFAULT_LANGUAGE])
+    template = language_text.get(key, TEXT[DEFAULT_LANGUAGE][key])
+    return template.format(**values)

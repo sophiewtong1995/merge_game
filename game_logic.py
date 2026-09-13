@@ -41,6 +41,49 @@ LEVELS = (
             WaveSpec("boss", 270),
         ),
     ),
+    LevelSpec(
+        102,
+        (
+            WaveSpec("normal", 60),
+            WaveSpec("normal", 65),
+            WaveSpec("boss", 240),
+            WaveSpec("normal", 70),
+            WaveSpec("boss", 300),
+        ),
+    ),
+    LevelSpec(
+        124,
+        (
+            WaveSpec("normal", 70),
+            WaveSpec("boss", 260),
+            WaveSpec("normal", 75),
+            WaveSpec("boss", 330),
+            WaveSpec("normal", 80),
+            WaveSpec("boss", 410),
+        ),
+    ),
+    LevelSpec(
+        140,
+        (
+            WaveSpec("normal", 82),
+            WaveSpec("normal", 88),
+            WaveSpec("boss", 320),
+            WaveSpec("normal", 94),
+            WaveSpec("boss", 400),
+            WaveSpec("boss", 500),
+        ),
+    ),
+    LevelSpec(
+        156,
+        (
+            WaveSpec("normal", 96),
+            WaveSpec("boss", 360),
+            WaveSpec("normal", 102),
+            WaveSpec("boss", 460),
+            WaveSpec("normal", 108),
+            WaveSpec("boss", 580),
+        ),
+    ),
 )
 
 
@@ -114,6 +157,7 @@ class GameState:
         self.wave_cleared = False
         self._load_wave()
         self._fill_initial_board()
+        self._save_level_start()
 
     @staticmethod
     def moves_for_stage(stage: int) -> int:
@@ -162,6 +206,35 @@ class GameState:
                 )
                 for color in COLORS
             }
+
+    @staticmethod
+    def _copy_board(
+        board: list[list[Optional[Piece]]],
+    ) -> list[list[Optional[Piece]]]:
+        return [
+            [None if piece is None else Piece(piece.color, piece.level) for piece in row]
+            for row in board
+        ]
+
+    def _save_level_start(self) -> None:
+        """保存进入本关时的完整检查点，供失败后公平重试。"""
+        self._level_start_board = self._copy_board(self.board)
+        self._level_start_random_state = self.random.getstate()
+        self._level_start_score = self.score
+        self._level_start_merges = self.merges
+
+    def restart_level(self) -> None:
+        """回到当前关开始时；不重新抽取棋盘或随机补棋序列。"""
+        self.board = self._copy_board(self._level_start_board)
+        self.random.setstate(self._level_start_random_state)
+        self.wave_index = 0
+        self.score = self._level_start_score
+        self.merges = self._level_start_merges
+        self.moves_remaining = self.level_spec.moves
+        self.game_over = False
+        self.game_won = False
+        self.wave_cleared = False
+        self._load_wave()
 
     def _new_piece(self) -> Piece:
         return Piece(self.random.choice(COLORS), self.random.choice((1, 1, 1, 2)))
@@ -281,6 +354,7 @@ class GameState:
             self.wave_index = 0
             self.moves_remaining = self.level_spec.moves
             self._load_wave()
+            self._save_level_start()
             return "level"
         self.game_won = True
         return "won"

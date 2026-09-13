@@ -203,6 +203,43 @@ class GameLogicTests(unittest.TestCase):
         self.assertTrue(all(monster.hp == 36 for monster in self.game.monsters.values()))
         self.assertEqual(self.game.moves_remaining, 42)
 
+    def test_restart_level_restores_its_entry_checkpoint(self):
+        self.game.score = 77
+        self.game.merges = 9
+        self.game.wave_cleared = True
+        self.assertEqual(self.game.advance_wave(), "level")
+        entry_board = self.game._copy_board(self.game.board)
+
+        self.game.board[0][0] = Piece("red", 6)
+        self.game.moves_remaining = 1
+        self.game.score = 999
+        self.game.merges = 99
+        self.game.wave_index = 1
+        self.game._load_wave()
+        self.game.game_over = True
+
+        self.game.restart_level()
+
+        self.assertEqual(self.game.level, 2)
+        self.assertEqual(self.game.wave_index, 0)
+        self.assertEqual(self.game.moves_remaining, 42)
+        self.assertEqual(self.game.score, 77)
+        self.assertEqual(self.game.merges, 9)
+        self.assertEqual(self.game.board, entry_board)
+        self.assertFalse(self.game.game_over)
+        self.assertFalse(self.game.is_boss_wave)
+
+    def test_restart_level_restores_refill_random_sequence(self):
+        self.game.restart_level()
+        self.game.board[0][0] = None
+        first_piece = self.game.refill()[0].piece
+
+        self.game.restart_level()
+        self.game.board[0][0] = None
+        second_piece = self.game.refill()[0].piece
+
+        self.assertEqual(first_piece, second_piece)
+
     def test_remaining_chain_damage_does_not_reach_next_wave(self):
         self.clear_board()
         self.game.monsters["red"].hp = 1
@@ -227,7 +264,7 @@ class GameLogicTests(unittest.TestCase):
         self.assertEqual(self.game.advance_wave(), "level")
         self.assertTrue(all(monster.hp == 36 for monster in self.game.monsters.values()))
 
-    def test_first_four_levels_have_expected_wave_layout(self):
+    def test_first_eight_levels_have_expected_wave_layout(self):
         self.assertEqual(
             [[wave.kind for wave in level.waves] for level in LEVELS],
             [
@@ -235,8 +272,13 @@ class GameLogicTests(unittest.TestCase):
                 ["normal", "boss"],
                 ["normal", "normal", "boss"],
                 ["normal", "boss", "normal", "boss"],
+                ["normal", "normal", "boss", "normal", "boss"],
+                ["normal", "boss", "normal", "boss", "normal", "boss"],
+                ["normal", "normal", "boss", "normal", "boss", "boss"],
+                ["normal", "boss", "normal", "boss", "normal", "boss"],
             ],
         )
+        self.assertEqual([level.moves for level in LEVELS], [24, 42, 60, 82, 102, 124, 140, 156])
 
     def test_advancing_to_boss_keeps_moves_and_board(self):
         self.game.level = 2
@@ -276,9 +318,21 @@ class GameLogicTests(unittest.TestCase):
             attack = self.game.activate(cell)
             self.assertEqual(attack.kind, "attack")
 
-    def test_clearing_final_boss_wins_the_game(self):
+    def test_clearing_fourth_level_starts_level_five(self):
         self.game.level = 4
         self.game.wave_index = 3
+        self.game._load_wave()
+        self.game.boss.hp = 1
+        result = self.game.resolve_attack("green", 10)
+
+        self.assertTrue(result.wave_cleared)
+        self.assertEqual(self.game.advance_wave(), "level")
+        self.assertEqual(self.game.level, 5)
+        self.assertEqual(self.game.moves_remaining, 102)
+
+    def test_clearing_eighth_level_final_boss_wins_the_game(self):
+        self.game.level = 8
+        self.game.wave_index = 5
         self.game._load_wave()
         self.game.boss.hp = 1
         result = self.game.resolve_attack("green", 10)
