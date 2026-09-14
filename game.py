@@ -40,6 +40,7 @@ LEVEL_CLEAR_GATHER_DURATION = 0.82
 LEVEL_CLEAR_BURST_AT = 0.72
 LEVEL_CLEAR_CARD_AT = 1.02
 LEVEL_CLEAR_BUTTON_AT = 1.42
+RUNNING_IN_BROWSER = sys.platform in ("emscripten", "wasi")
 
 PALETTE = {
     "sky": (104, 204, 235),
@@ -217,6 +218,39 @@ class Game:
         }
 
     @staticmethod
+    def remove_checkerboard_from_halo(frame):
+        """Remove the opaque gray checker patch accidentally baked into frame 6."""
+        width, height = frame.get_size()
+        neutral_pixels = pygame.mask.Mask((width, height))
+        halo_bottom = round(height * 0.44)
+        for y in range(halo_bottom):
+            for x in range(width):
+                color = frame.get_at((x, y))
+                channels = (color.r, color.g, color.b)
+                if (
+                    color.a > 8
+                    and min(channels) >= 170
+                    and max(channels) - min(channels) <= 18
+                ):
+                    neutral_pixels.set_at((x, y))
+
+        removal = pygame.mask.Mask((width, height))
+        for component in neutral_pixels.connected_components(8):
+            # The checker fill forms one large neutral patch. Tiny white accents
+            # on stars, horns, and highlights stay intact.
+            if component.count() >= 1000:
+                removal.draw(component, (0, 0))
+        if removal.count() == 0:
+            return frame
+
+        keep_alpha = removal.to_surface(
+            setcolor=(255, 255, 255, 0),
+            unsetcolor=(255, 255, 255, 255),
+        )
+        frame.blit(keep_alpha, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        return frame
+
+    @staticmethod
     def load_animation_frames(path: Path, size: tuple[int, int]):
         try:
             sheet = pygame.image.load(path).convert_alpha()
@@ -259,6 +293,8 @@ class Game:
                     frame.blit(alpha_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
                 else:
                     main_rect = frame.get_rect()
+                if row == 1 and col == 2:
+                    frame = Game.remove_checkerboard_from_halo(frame)
                 frames.append(frame)
                 main_bounds.append(main_rect)
 
@@ -511,7 +547,7 @@ class Game:
                 self.running = False
             elif self.level_clear_started_at:
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
+                    if event.key == pygame.K_ESCAPE and not RUNNING_IN_BROWSER:
                         self.running = False
                     elif (
                         event.key in (pygame.K_SPACE, pygame.K_RETURN)
@@ -528,7 +564,7 @@ class Game:
                 ):
                     self.continue_from_level_clear()
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
+                if event.key == pygame.K_ESCAPE and not RUNNING_IN_BROWSER:
                     self.running = False
                 elif event.key == pygame.K_r:
                     full_restart = bool(event.mod & pygame.KMOD_SHIFT)
@@ -1532,11 +1568,12 @@ class Game:
             self.draw_control_hints()
 
     def draw_control_hints(self):
-        groups = (
+        groups = [
             (("R",), self.text("restart_short")),
             (("SHIFT", "+", "R"), self.text("new_game_short")),
-            (("ESC",), self.text("quit_short")),
-        )
+        ]
+        if not RUNNING_IN_BROWSER:
+            groups.append((("ESC",), self.text("quit_short")))
         key_face = font(11, True)
         label_face = font(12, True)
         key_padding = 7
