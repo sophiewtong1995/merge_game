@@ -13,6 +13,40 @@ python -m pip install -r requirements.txt
 python game.py
 ```
 
+游戏循环同时兼容桌面 asyncio 和 Pygbag 的浏览器事件循环。
+
+## 构建 itch.io 网页版
+
+安装包含固定版本 Pygbag 的开发依赖：
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+生成 itch.io 可上传的 ZIP：
+
+```bash
+./scripts/build_web.sh
+```
+
+构建结果位于 `dist/candy-monster-merge-web.zip`。脚本使用发布白名单，并在
+暂存目录中将高清 PNG 缩小为适合浏览器的运行尺寸；源素材不会被修改。概念图、
+测试文件、预览图和本地虚拟环境都不会进入游戏包。ZIP 根目录包含 itch.io
+HTML5 项目所需的 `index.html`。
+
+本地浏览器预览文件同时生成在 `build/web-preview`，可以用 HTTP 服务器打开：
+
+```bash
+cd build/web-preview
+python -m http.server 8000
+```
+
+如果虚拟环境不在 `.venv`，可以显式指定 Python：
+
+```bash
+PYTHON_BIN=/path/to/python ./scripts/build_web.sh
+```
+
 ## 玩法
 
 - 只能通过拖拽操作合成物品。

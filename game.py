@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 from functools import lru_cache
 from pathlib import Path
@@ -1840,18 +1841,28 @@ class Game:
         self.draw_game_over()
         pygame.display.flip()
 
-    def run(self):
+    async def run(self):
         while self.running:
             self.events()
             self.update()
             self.draw()
             self.clock.tick(FPS)
-        pygame.quit()
+            # Pygbag runs the game cooperatively in the browser event loop.
+            # This is also harmless when the desktop entry point uses asyncio.
+            await asyncio.sleep(0)
+
+        # In a browser, asyncio.run() is non-blocking and the WASM runtime owns
+        # pygame's lifetime. Quitting there would tear down the canvas.
+        if sys.platform not in ("emscripten", "wasi"):
+            pygame.quit()
+
+
+async def main() -> None:
+    try:
+        await Game().run()
+    except pygame.error as exc:
+        print(translate(DEFAULT_LANGUAGE, "pygame_error", error=exc))
 
 
 if __name__ == "__main__":
-    try:
-        Game().run()
-    except pygame.error as exc:
-        print(translate(DEFAULT_LANGUAGE, "pygame_error", error=exc))
-        sys.exit(1)
+    asyncio.run(main())
