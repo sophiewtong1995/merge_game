@@ -34,12 +34,15 @@ python -m pip install -r requirements-dev.txt
 测试文件、预览图和本地虚拟环境都不会进入游戏包。ZIP 根目录包含 itch.io
 HTML5 项目所需的 `index.html`。
 
-本地浏览器预览文件同时生成在 `build/web-preview`，可以用 HTTP 服务器打开：
+本地预览必须使用 Pygbag 自带服务器，因为它还会代理并缓存浏览器版 Python
+和 Pygame 依赖。完成构建后运行：
 
 ```bash
-cd build/web-preview
-python -m http.server 8000
+./scripts/serve_web.sh
 ```
+
+然后打开 `http://localhost:8000`。不要使用 `python -m http.server`，否则浏览器
+首次加载 Pygame 依赖时会得到 404，并停留在纯蓝色画布。
 
 如果虚拟环境不在 `.venv`，可以显式指定 Python：
 
